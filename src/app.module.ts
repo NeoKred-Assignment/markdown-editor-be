@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import configuration from './config/configuration';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { MarkdownModule } from './markdown/markdown.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { AppService } from './app.service';
       envFilePath: ['.env'],
       load: [configuration],
     }),
+    MarkdownModule,
   ],
   controllers: [AppController],
   providers: [AppService],

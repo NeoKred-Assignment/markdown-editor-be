@@ -96,3 +96,17 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+
+### Usage
+1. Open your browser and navigate to `http://localhost:3000`
+2. Start typing Markdown in the left pane
+3. See the rendered HTML in the right pane in real-time
+4. Use the buttons to upload, download, or clear your content
+5. Toggle between light and dark mode with the theme button
+
+## Project Structure
+
+The project follows the Atomic Design Pattern for the frontend and a modular architecture for the backend.
+
+### Frontend Structure

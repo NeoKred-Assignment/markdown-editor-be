@@ -21,6 +21,8 @@ async function bootstrap() {
 
   app.enableCors({
     origin: corsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true,
   });
   app.enableVersioning({
     type: VersioningType.URI,
