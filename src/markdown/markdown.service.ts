@@ -10,19 +10,21 @@ export class MarkdownService {
     // Process front matter
     markdown = this.processFrontMatter(markdown);
 
-    // Convert headings with emoji support
-    markdown = markdown.replace(/^# (.*$)/gm, '<h1>$1</h1>');
-    markdown = markdown.replace(/^## (.*$)/gm, '<h2>$1</h2>');
-    markdown = markdown.replace(/^### (.*$)/gm, '<h3>$1</h3>');
-    markdown = markdown.replace(/^#### (.*$)/gm, '<h4>$1</h4>');
-    markdown = markdown.replace(/^##### (.*$)/gm, '<h5>$1</h5>');
-    markdown = markdown.replace(/^###### (.*$)/gm, '<h6>$1</h6>');
+    // Convert headers with anchor IDs
+    markdown = this.convertHeaders(markdown);
 
     // Convert horizontal rules
-    markdown = markdown.replace(/^(___|\*\*\*|---)$/gm, '<hr>');
+    markdown = markdown.replace(
+      /^(___|\*\*\*|---)$/gm,
+      '<hr class="markdown-hr">',
+    );
 
     // Convert typographic replacements
     markdown = this.convertTypography(markdown);
+
+    // Convert callouts and notes
+    markdown = this.convertCallouts(markdown);
+    markdown = this.convertNotes(markdown);
 
     // Convert code blocks with syntax highlighting (must come before inline code)
     markdown = this.convertCodeBlocks(markdown);
@@ -37,30 +39,23 @@ export class MarkdownService {
     // Convert blockquotes with nesting
     markdown = this.convertBlockquotes(markdown);
 
-    // Convert lists
+    // Convert lists with proper nesting support
     markdown = this.convertLists(markdown);
 
     // Convert tables
     markdown = this.convertTables(markdown);
 
-    // Convert links
-    markdown = markdown.replace(
-      /\[([^\]]+)\]\(([^)]+)(?:\s+"([^"]+)")?\)/g,
-      (match: string, text: string, url: string, title?: string) => {
-        return `<a href="${url}"${title ? ` title="${title}"` : ''}>${text}</a>`;
-      },
-    );
+    // Convert images (must come before links)
+    markdown = this.convertImages(markdown);
 
-    // Convert images
-    markdown = markdown.replace(
-      /!\[([^\]]+)\]\(([^)]+)(?:\s+"([^"]+)")?\)/g,
-      (match: string, alt: string, url: string, title?: string) => {
-        return `<img src="${url}" alt="${alt}"${title ? ` title="${title}"` : ''}>`;
-      },
-    );
+    // Convert links with support for anchors
+    markdown = this.convertLinks(markdown);
 
     // Convert inline code (after code blocks)
-    markdown = markdown.replace(/`([^`]+)`/g, '<code>$1</code>');
+    markdown = markdown.replace(
+      /`([^`]+)`/g,
+      '<code class="inline-code">$1</code>',
+    );
 
     // Convert footnotes
     markdown = this.convertFootnotes(markdown);
@@ -78,8 +73,20 @@ export class MarkdownService {
     markdown = markdown.replace(/~([^~]+)~/g, '<sub>$1</sub>');
     markdown = markdown.replace(/\^([^\^]+)\^/g, '<sup>$1</sup>');
 
+    // Convert embeds
+    markdown = this.convertEmbeds(markdown);
+
+    // Convert details/summary elements
+    markdown = this.convertDetails(markdown);
+
+    // Convert columns layout
+    markdown = this.convertColumns(markdown);
+
     // Convert line breaks (but preserve paragraphs)
     markdown = this.convertLineBreaks(markdown);
+
+    // Clean the final HTML to remove unnecessary <br> tags
+    markdown = this.cleanHtml(markdown);
 
     return markdown;
   }
@@ -139,7 +146,7 @@ export class MarkdownService {
           // Start a new blockquote
           inBlockquote = true;
           blockquoteLevel = level;
-          
+
           // Open the required number of blockquote tags
           for (let j = 0; j < level; j++) {
             result.push('<blockquote>');
@@ -150,14 +157,14 @@ export class MarkdownService {
           result.push(content);
         } else if (level > blockquoteLevel) {
           // Increase nesting level
-          for (let j = 0; j < (level - blockquoteLevel); j++) {
+          for (let j = 0; j < level - blockquoteLevel; j++) {
             result.push('<blockquote>');
           }
           blockquoteLevel = level;
           result.push(content);
         } else {
           // Decrease nesting level
-          for (let j = 0; j < (blockquoteLevel - level); j++) {
+          for (let j = 0; j < blockquoteLevel - level; j++) {
             result.push('</blockquote>');
           }
           blockquoteLevel = level;
@@ -195,94 +202,412 @@ export class MarkdownService {
   }
 
   private convertLists(markdown: string): string {
-    // This is a simplified approach - a full implementation would need a proper parser
+    // First, identify and process nested lists
+    let result = markdown;
+
+    // Match list items and maintain proper nesting
+    const processListItems = (text: string, isOrdered: boolean): string => {
+      const listTag = isOrdered ? 'ol' : 'ul';
+      const listItems = text
+        .split('\n')
+        .filter((line) => line.trim().length > 0);
+
+      let html = `<${listTag} class="markdown-list">`;
+      let currentIndent = 0;
+      let stack: number[] = [];
+
+      for (let i = 0; i < listItems.length; i++) {
+        const line = listItems[i];
+
+        // Count leading spaces to determine indentation level
+        const match = line.match(/^(\s*)([\*\-\+]|\d+\.)\s+(.*)/);
+
+        if (!match) continue;
+
+        const [, indent, marker, content] = match;
+        const indentLevel = indent.length;
+        const isOrderedItem = /^\d+\./.test(marker);
+
+        // Handle indentation changes
+        if (indentLevel > currentIndent) {
+          // Deeper level - start a new sublist
+          const newListTag = isOrderedItem ? 'ol' : 'ul';
+          html += `<${newListTag} class="markdown-sublist">`;
+          stack.push(currentIndent);
+          currentIndent = indentLevel;
+        } else if (indentLevel < currentIndent) {
+          // Going back up - close sublists
+          while (stack.length > 0 && indentLevel <= stack[stack.length - 1]) {
+            const parentListTag = isOrderedItem ? 'ol' : 'ul';
+            html += `</${parentListTag}>`;
+            currentIndent = stack.pop() || 0;
+          }
+        }
+
+        // Add the list item
+        html += `<li>${content}</li>`;
+      }
+
+      // Close any remaining open lists
+      while (stack.length > 0) {
+        const listType = isOrdered ? 'ol' : 'ul';
+        html += `</${listType}>`;
+        stack.pop();
+      }
+
+      html += `</${listTag}>`;
+      return html;
+    };
+
+    // Find and process unordered lists (*, -, +)
+    result = result.replace(
+      /(?:^|\n)((?:\s*[\*\-\+]\s+.*(?:\n|$))+)/g,
+      (match, listContent) => {
+        return processListItems(listContent, false);
+      },
+    );
+
+    // Find and process ordered lists (1., 2., etc)
+    result = result.replace(
+      /(?:^|\n)((?:\s*\d+\.\s+.*(?:\n|$))+)/g,
+      (match, listContent) => {
+        return processListItems(listContent, true);
+      },
+    );
+
+    return result;
+  }
+
+  private convertTables(markdown: string): string {
     let result = markdown;
     
-    // Handle unordered lists
-    result = result.replace(/^(\s*)[*+-]\s+(.*?)$/gm, (match: string, indent: string, content: string) => {
-      const indentLevel = Math.floor(indent.length / 2);
-      return `${indent}<li>${content}</li>`;
+    // First handle standard markdown tables
+    const standardTableRegex = /^\|(.*\|)+\s*\n\|([\s\-:|]+\|)+\s*\n(\|(.*\|)+\s*\n?)+/gm;
+    result = result.replace(standardTableRegex, (match) => {
+      return this.processStandardTable(match);
     });
     
-    // Handle ordered lists
-    result = result.replace(/^(\s*)\d+\.\s+(.*?)$/gm, (match: string, indent: string, content: string) => {
-      const indentLevel = Math.floor(indent.length / 2);
-      return `${indent}<li>${content}</li>`;
-    });
-    
-    // Wrap list items in appropriate list tags
-    // This is a simplified approach that won't handle complex nesting correctly
-    result = result.replace(/(<li>.*?<\/li>\n)+/gs, (match: string) => {
-      // Determine if it's an ordered or unordered list based on the first item
-      const isOrdered = match.includes('\\d+\\.');
-      const listTag = isOrdered ? 'ol' : 'ul';
-      return `<${listTag}>\n${match}</${listTag}>\n`;
+    // Then handle simple pipe tables (without separator row)
+    const simplePipeTableRegex = /(?:^|\n)(\|[^\n]+\|\s*\n)(?:\|[^\n]+\|\s*\n)+/g;
+    result = result.replace(simplePipeTableRegex, (match) => {
+      // Skip if already processed as a standard table
+      if (match.includes('<table class="markdown-table">')) {
+        return match;
+      }
+      return this.processSimpleTable(match);
     });
     
     return result;
   }
 
-  private convertTables(markdown: string): string {
-    const tableRegex = /^\|(.+)\|\r?\n\|([-:]+[-| :]*)\|\r?\n((?:\|.+\|\r?\n?)+)$/gm;
-
-    return markdown.replace(tableRegex, (match: string, headerRow: string, alignmentRow: string, bodyRows: string) => {
-      // Process header cells
-      const headers = headerRow.split('|')
-        .map(cell => cell.trim())
-        .filter(Boolean);
+  /**
+   * Processes a standard markdown table with header, separator, and body rows
+   */
+  private processStandardTable(tableText: string): string {
+    // Split the table into rows and clean them
+    const rows = tableText.trim().split('\n').map(row => row.trim());
+    
+    if (rows.length < 3) {
+      return tableText; // Not enough rows for a proper table
+    }
+    
+    // Extract the header row
+    const headerRow = rows[0];
+    const headerCells = this.extractTableCells(headerRow);
+    
+    // Process the separator row to determine alignments
+    const separatorRow = rows[1];
+    const alignments = this.extractTableAlignments(separatorRow);
+    
+    // Generate table HTML without newlines between tags
+    let tableHtml = '<div class="table-container table-debug"><table class="markdown-table">';
+    
+    // Add header
+    tableHtml += '<thead><tr>';
+    headerCells.forEach((cell, index) => {
+      const alignment = index < alignments.length ? alignments[index] : 'left';
+      const processedContent = this.processTableCellContent(cell.trim());
+      tableHtml += `<th class="align-${alignment}">${processedContent}</th>`;
+    });
+    tableHtml += '</tr></thead>';
+    
+    // Add body - SKIP ROW WITH DASHES (row 1 is already processed as separator)
+    tableHtml += '<tbody>';
+    for (let i = 2; i < rows.length; i++) {
+      const row = rows[i];
+      // Skip empty rows and separator-like rows
+      if (!row.trim() || row.replace(/[\s\-|:]/g, '').length === 0) continue;
       
-      // Process alignment row
-      const alignments = alignmentRow.split('|')
-        .map(cell => cell.trim())
-        .filter(Boolean)
-        .map(cell => {
-          if (cell.startsWith(':') && cell.endsWith(':')) return 'center';
-          if (cell.endsWith(':')) return 'right';
-          return 'left';
-        });
-
-      // Start building the HTML table
-      let html = '<table>\n<thead>\n<tr>\n';
+      const cells = this.extractTableCells(row);
       
-      // Add header cells
-      headers.forEach((cell, i) => {
-        const align = i < alignments.length ? alignments[i] : 'left';
-        html += `<th align="${align}">${cell}</th>\n`;
+      tableHtml += '<tr>';
+      cells.forEach((cell, index) => {
+        const alignment = index < alignments.length ? alignments[index] : 'left';
+        const processedContent = this.processTableCellContent(cell.trim());
+        tableHtml += `<td class="align-${alignment}">${processedContent}</td>`;
       });
+      tableHtml += '</tr>';
+    }
+    tableHtml += '</tbody></table></div>';
+    
+    return tableHtml;
+  }
+
+  /**
+   * Processes a simple pipe-separated table without a separator row
+   */
+  private processSimpleTable(tableText: string): string {
+    // Split the table into rows and clean them
+    const rows = tableText.trim().split('\n').map(row => row.trim());
+    
+    if (rows.length < 2) {
+      return tableText; // Not enough rows for a proper table
+    }
+    
+    // Extract the cells from all rows
+    const allRows = rows.map(row => this.extractTableCells(row));
+    
+    // Check if the second row looks like a separator row
+    const isSeparatorRow = (row: string[]) => {
+      return row.every(cell => !cell.trim() || /^[\s\-:]+$/.test(cell.trim()));
+    };
+    
+    // Determine if we have a separator row
+    const hasSeparator = allRows.length > 1 && isSeparatorRow(allRows[1]);
+    const headerIndex = 0;
+    const bodyStartIndex = hasSeparator ? 2 : 1;
+    
+    // Generate table HTML without newlines between tags
+    let tableHtml = '<div class="table-container table-debug"><table class="markdown-table simple-table">';
+    
+    // Add header
+    tableHtml += '<thead><tr>';
+    allRows[headerIndex].forEach(cell => {
+      const processedContent = this.processTableCellContent(cell.trim());
+      tableHtml += `<th>${processedContent}</th>`;
+    });
+    tableHtml += '</tr></thead>';
+    
+    // Add body
+    tableHtml += '<tbody>';
+    for (let i = bodyStartIndex; i < allRows.length; i++) {
+      const cells = allRows[i];
       
-      html += '</tr>\n</thead>\n<tbody>\n';
+      // Skip separator-like rows
+      if (isSeparatorRow(cells)) continue;
       
-      // Process body rows
-      const rows = bodyRows.trim().split('\n');
-      rows.forEach(row => {
-        const cells = row.split('|')
-          .map(cell => cell.trim())
-          .filter(Boolean);
-        
-        html += '<tr>\n';
-        cells.forEach((cell, i) => {
-          const align = i < alignments.length ? alignments[i] : 'left';
-          html += `<td align="${align}">${cell}</td>\n`;
-        });
-        html += '</tr>\n';
+      tableHtml += '<tr>';
+      cells.forEach(cell => {
+        const processedContent = this.processTableCellContent(cell.trim());
+        tableHtml += `<td>${processedContent}</td>`;
       });
+      tableHtml += '</tr>';
+    }
+    tableHtml += '</tbody></table></div>';
+    
+    return tableHtml;
+  }
+
+  /**
+   * Process the content of a table cell to handle inline markdown
+   */
+  private processTableCellContent(cellContent: string): string {
+    if (!cellContent) return '';
+    
+    // Process inline elements
+    let processed = cellContent;
+    
+    // Process images with proper sizing
+    processed = processed.replace(/!\[(.*?)\]\((.*?)\)/g, 
+      '<img src="$2" alt="$1" class="table-image">');
       
-      html += '</tbody>\n</table>';
-      return html;
+    // Process links
+    processed = processed.replace(/\[(.*?)\]\((.*?)\)/g, 
+      '<a href="$2" target="_blank">$1</a>');
+      
+    // Process bold text
+    processed = processed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    processed = processed.replace(/__(.*?)__/g, '<strong>$1</strong>');
+    
+    // Process italic text
+    processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
+    processed = processed.replace(/_(.*?)_/g, '<em>$1</em>');
+    
+    // Process code spans
+    processed = processed.replace(/`(.*?)`/g, '<code>$1</code>');
+    
+    // Replace any remaining newlines with spaces instead of <br>
+    processed = processed.replace(/\n/g, ' ');
+    
+    return processed;
+  }
+
+  private extractTableCells(row: string): string[] {
+    // Remove leading and trailing | and whitespace
+    const trimmedRow = row.trim().replace(/^\||\|\s*$/g, '');
+    
+    // Split by | but preserve escaped pipe characters
+    let cells: string[] = [];
+    let currentCell: string = '';
+    let insideCode: boolean = false;
+    
+    for (let i = 0; i < trimmedRow.length; i++) {
+      const char = trimmedRow[i];
+      const nextChar = trimmedRow[i + 1] || '';
+      
+      if (char === '`') {
+        insideCode = !insideCode;
+        currentCell += char;
+      } else if (char === '\\' && nextChar === '|') {
+        currentCell += '|';
+        i++; // Skip the next character
+      } else if (char === '|' && !insideCode) {
+        cells.push(currentCell);
+        currentCell = '';
+      } else {
+        currentCell += char;
+      }
+    }
+    
+    // Add the last cell
+    cells.push(currentCell);
+    
+    return cells;
+  }
+
+  private extractTableAlignments(separatorRow: string): string[] {
+    // Remove leading and trailing | and whitespace
+    const trimmedRow = separatorRow.trim().replace(/^\||\|\s*$/g, '');
+    
+    // Split by |
+    const cells = trimmedRow.split('|');
+    
+    // Determine alignment based on the position of : characters
+    return cells.map(cell => {
+      const trimmed = cell.trim();
+      if (trimmed.startsWith(':') && trimmed.endsWith(':')) {
+        return 'center';
+      } else if (trimmed.endsWith(':')) {
+        return 'right';
+      } else {
+        return 'left';
+      }
     });
   }
 
   private convertCodeBlocks(markdown: string): string {
-    // Handle code blocks with language specification
-    return markdown.replace(/```(\w*)\n([\s\S]+?)```/g, (match: string, lang: string, code: string) => {
-      const escapedCode = this.escapeHtml(code);
-      if (lang) {
-        // Use a placeholder for syntax highlighting that can be replaced client-side
+    // Process code blocks with different formats
+    let result = markdown;
+
+    // Process blocks with line numbers and language specification
+    result = result.replace(
+      /```line_numbers,(\w+)\n([\s\S]+?)```/g,
+      (match: string, lang: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        const lines = escapedCode.split('\n');
+
+        let numberedCode = '<div class="code-with-line-numbers">\n';
+        numberedCode += '<div class="line-numbers">\n';
+
+        for (let i = 1; i <= lines.length; i++) {
+          numberedCode += `<span class="line-number">${i}</span>\n`;
+        }
+
+        numberedCode +=
+          '</div>\n<pre><code class="language-' +
+          lang +
+          '">' +
+          escapedCode +
+          '</code></pre>\n</div>';
+        return numberedCode;
+      },
+    );
+
+    // Process command blocks (standard command)
+    result = result.replace(
+      /```command\n([\s\S]+?)```/g,
+      (match: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        return `<div class="command-block"><pre><code class="command">${escapedCode}</code></pre></div>`;
+      },
+    );
+
+    // Process command blocks with environment
+    result = result.replace(
+      /```command\n\[environment\s+(\w+)\]\n([\s\S]+?)```/g,
+      (match: string, env: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        return `<div class="command-block environment-${env}"><div class="environment-label">${env}</div><pre><code class="command">${escapedCode}</code></pre></div>`;
+      },
+    );
+
+    // Process super_user (root) command blocks
+    result = result.replace(
+      /```super_user\n([\s\S]+?)```/g,
+      (match: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        return `<div class="super-user-block"><pre><code class="super-user">${escapedCode}</code></pre></div>`;
+      },
+    );
+
+    // Process custom prefix command blocks
+    result = result.replace(
+      /```custom_prefix\(([^)]+)\)\n([\s\S]+?)```/g,
+      (match: string, prefix: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        // Handle "\s" in prefix to represent a space
+        const formattedPrefix = prefix.replace(/\\s/g, ' ');
+        return `<div class="custom-prefix-block" data-prefix="${this.escapeHtml(formattedPrefix)}"><pre><code>${escapedCode}</code></pre></div>`;
+      },
+    );
+
+    // Process blocks with secondary labels
+    result = result.replace(
+      /```\n\[secondary_label\s+([^\]]+)\]\n([\s\S]+?)```/g,
+      (match: string, label: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
+        return `<div class="secondary-label-block"><div class="secondary-label">${label}</div><pre><code>${escapedCode}</code></pre></div>`;
+      },
+    );
+
+    // Process blocks with labels and environments
+    result = result.replace(
+      /```(\w+)\n\[environment\s+(\w+)\]\n\[label\s+([^\]]+)\]\n([\s\S]+?)```/g,
+      (
+        match: string,
+        lang: string,
+        env: string,
+        label: string,
+        code: string,
+      ) => {
+        const escapedCode = this.escapeHtml(code);
+        return `<div class="code-block environment-${env}">
+          <div class="environment-label">${env}</div>
+          <div class="code-label">${label}</div>
+          <pre><code class="language-${lang}">${escapedCode}</code></pre>
+        </div>`;
+      },
+    );
+
+    // Process standard code blocks with language specification
+    result = result.replace(
+      /```(\w+)\n([\s\S]+?)```/g,
+      (match: string, lang: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
         return `<pre><code class="language-${lang}">${escapedCode}</code></pre>`;
-      } else {
+      },
+    );
+
+    // Process plain code blocks
+    result = result.replace(
+      /```\n([\s\S]+?)```/g,
+      (match: string, code: string) => {
+        const escapedCode = this.escapeHtml(code);
         return `<pre><code>${escapedCode}</code></pre>`;
-      }
-    });
+      },
+    );
+
+    return result;
   }
 
   private escapeHtml(text: string): string {
@@ -299,10 +624,13 @@ export class MarkdownService {
     let result = markdown;
 
     // Extract footnote definitions
-    result = result.replace(/^\[\^(\w+)\]:\s+([\s\S]+?)(?=\n\n|\n\[\^|$)/gm, (match: string, id: string, content: string) => {
-      footnotes.set(id, content.trim());
-      return '';
-    });
+    result = result.replace(
+      /^\[\^(\w+)\]:\s+([\s\S]+?)(?=\n\n|\n\[\^|$)/gm,
+      (match: string, id: string, content: string) => {
+        footnotes.set(id, content.trim());
+        return '';
+      },
+    );
 
     // Replace footnote references
     result = result.replace(/\[\^(\w+)\]/g, (match: string, id: string) => {
@@ -335,16 +663,22 @@ export class MarkdownService {
     let result = markdown;
 
     // Extract abbreviation definitions
-    result = result.replace(/^\*\[(.*?)\]:\s+(.*?)$/gm, (match: string, abbr: string, definition: string) => {
-      abbrs.set(abbr, definition.trim());
-      return '';
-    });
+    result = result.replace(
+      /^\*\[(.*?)\]:\s+(.*?)$/gm,
+      (match: string, abbr: string, definition: string) => {
+        abbrs.set(abbr, definition.trim());
+        return '';
+      },
+    );
 
     // Replace abbreviations in text
     abbrs.forEach((definition, abbr) => {
       const escapedAbbr = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const regex = new RegExp(`\\b${escapedAbbr}\\b`, 'g');
-      result = result.replace(regex, `<abbr title="${definition}">${abbr}</abbr>`);
+      result = result.replace(
+        regex,
+        `<abbr title="${definition}">${abbr}</abbr>`,
+      );
     });
 
     return result;
@@ -352,9 +686,12 @@ export class MarkdownService {
 
   private convertCustomContainers(markdown: string): string {
     // Convert custom containers like ::: warning ... :::
-    return markdown.replace(/:::\s*(\w+)\n([\s\S]+?):::/g, (match: string, type: string, content: string) => {
-      return `<div class="${type}">${content}</div>`;
-    });
+    return markdown.replace(
+      /:::\s*(\w+)\n([\s\S]+?):::/g,
+      (match: string, type: string, content: string) => {
+        return `<div class="${type}">${content}</div>`;
+      },
+    );
   }
 
   private convertLineBreaks(markdown: string): string {
@@ -364,8 +701,10 @@ export class MarkdownService {
     // Process each paragraph
     const processedParagraphs = paragraphs.map((para: string) => {
       // Skip if it's already an HTML element
-      if (para.trim().match(/^<(\w+)[^>]*>.*<\/\1>$/s) || 
-          para.trim().match(/^<(\w+)[^>]*\/?>$/)) {
+      if (
+        para.trim().match(/^<(\w+)[^>]*>.*<\/\1>$/s) ||
+        para.trim().match(/^<(\w+)[^>]*\/?>$/)
+      ) {
         return para;
       }
 
@@ -381,5 +720,379 @@ export class MarkdownService {
     });
 
     return processedParagraphs.join('\n\n');
+  }
+
+  private convertImages(markdown: string): string {
+    // Basic image conversion
+    let result = markdown.replace(
+      /!\[(.*?)\]\((.*?)(?:\s+"(.*?)")?\)/g,
+      (match: string, alt: string, url: string, title: string) => {
+        return `<img src="${url}" alt="${alt}"${title ? ` title="${title}"` : ''}>`;
+      },
+    );
+
+    // Extended image syntax with width, height, and alignment
+    result = result.replace(
+      /!\[(.*?)\]\((.*?)\)\{\s*(?:width=(\d+%?|auto))?\s*(?:height=(\d+%?|auto))?\s*(?:align=(left|right|center))?\s*\}/g,
+      (
+        match: string,
+        alt: string,
+        url: string,
+        width: string,
+        height: string,
+        align: string,
+      ) => {
+        let style = '';
+        if (width) style += `width: ${width}; `;
+        if (height) style += `height: ${height}; `;
+        if (align) {
+          if (align === 'left') style += 'float: left; margin-right: 10px; ';
+          else if (align === 'right')
+            style += 'float: right; margin-left: 10px; ';
+          else if (align === 'center')
+            style += 'display: block; margin: 0 auto; ';
+        }
+
+        return `<img src="${url}" alt="${alt}" style="${style.trim()}">`;
+      },
+    );
+
+    return result;
+  }
+
+  private convertEmbeds(markdown: string): string {
+    let result = markdown;
+
+    // YouTube embeds [youtube videoId height width]
+    result = result.replace(
+      /\[youtube\s+([a-zA-Z0-9_-]+)(?:\s+(\d+))?(?:\s+(\d+))?\]/g,
+      (match, videoId, height, width) => {
+        const h = height || '360';
+        const w = width || '640';
+        return `<div class="video-embed youtube-embed">
+          <iframe 
+            width="${w}" 
+            height="${h}" 
+            src="https://www.youtube.com/embed/${videoId}" 
+            frameborder="0" 
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+            allowfullscreen>
+          </iframe>
+        </div>`;
+      },
+    );
+
+    // Vimeo embeds [vimeo videoId height width]
+    result = result.replace(
+      /\[vimeo\s+([a-zA-Z0-9_-]+)(?:\s+(\d+))?(?:\s+(\d+))?\]/g,
+      (match, videoId, height, width) => {
+        const h = height || '360';
+        const w = width || '640';
+        return `<div class="video-embed vimeo-embed">
+          <iframe 
+            width="${w}" 
+            height="${h}" 
+            src="https://player.vimeo.com/video/${videoId}" 
+            frameborder="0" 
+            allow="autoplay; fullscreen; picture-in-picture" 
+            allowfullscreen>
+          </iframe>
+        </div>`;
+      },
+    );
+
+    // HTML5 video [video url type poster height width]
+    result = result.replace(
+      /\[video\s+([^\s]+)(?:\s+([^\s]+))?(?:\s+([^\s]+))?(?:\s+(\d+))?(?:\s+(\d+))?\]/g,
+      (match, url, type, poster, height, width) => {
+        const h = height ? `height="${height}"` : '';
+        const w = width ? `width="${width}"` : '';
+        const posterAttr = poster ? `poster="${poster}"` : '';
+        const videoType = type || this.getVideoTypeFromUrl(url);
+
+        return `<div class="video-embed html5-video">
+          <video controls ${h} ${w} ${posterAttr}>
+            <source src="${url}" type="video/${videoType}">
+            Your browser does not support the video tag.
+          </video>
+        </div>`;
+      },
+    );
+
+    // HTML5 audio [audio url type height width]
+    result = result.replace(
+      /\[audio\s+([^\s]+)(?:\s+([^\s]+))?(?:\s+(\d+))?(?:\s+(\d+))?\]/g,
+      (match, url, type, height, width) => {
+        const h = height ? `height="${height}"` : '';
+        const w = width ? `width="${width}"` : '';
+        const audioType = type || this.getAudioTypeFromUrl(url);
+
+        return `<div class="audio-embed">
+          <audio controls ${h} ${w}>
+            <source src="${url}" type="audio/${audioType}">
+            Your browser does not support the audio tag.
+          </audio>
+        </div>`;
+      },
+    );
+
+    // SoundCloud embeds [soundcloud url height]
+    result = result.replace(
+      /\[soundcloud\s+([^\s]+)(?:\s+(\d+))?\]/g,
+      (match, url, height) => {
+        const h = height || '166';
+
+        return `<div class="audio-embed soundcloud-embed">
+          <iframe 
+            width="100%" 
+            height="${h}" 
+            scrolling="no" 
+            frameborder="no" 
+            src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&color=%23ff5500&auto_play=false&hide_related=false&show_comments=true&show_user=true&show_reposts=false&show_teaser=true">
+          </iframe>
+        </div>`;
+      },
+    );
+
+    // Spotify embeds [spotify track/album/playlist id height]
+    result = result.replace(
+      /\[spotify\s+(track|album|playlist)\/([a-zA-Z0-9]+)(?:\s+(\d+))?\]/g,
+      (match, type, id, height) => {
+        const h = height || (type === 'track' ? '80' : '380');
+
+        return `<div class="audio-embed spotify-embed">
+          <iframe 
+            src="https://open.spotify.com/embed/${type}/${id}" 
+            width="100%" 
+            height="${h}" 
+            frameborder="0" 
+            allowtransparency="true" 
+            allow="encrypted-media">
+          </iframe>
+        </div>`;
+      },
+    );
+
+    return result;
+  }
+
+  // Helper method to determine video type from URL
+  private getVideoTypeFromUrl(url: string): string {
+    const extension = url.split('.').pop()?.toLowerCase();
+
+    switch (extension) {
+      case 'mp4':
+        return 'mp4';
+      case 'webm':
+        return 'webm';
+      case 'ogg':
+      case 'ogv':
+        return 'ogg';
+      default:
+        return 'mp4'; // Default to mp4
+    }
+  }
+
+  // Helper method to determine audio type from URL
+  private getAudioTypeFromUrl(url: string): string {
+    const extension = url.split('.').pop()?.toLowerCase();
+
+    switch (extension) {
+      case 'mp3':
+        return 'mpeg';
+      case 'wav':
+        return 'wav';
+      case 'ogg':
+        return 'ogg';
+      default:
+        return 'mpeg'; // Default to mp3
+    }
+  }
+
+  private convertDetails(markdown: string): string {
+    // Convert details/summary elements
+    return markdown.replace(
+      /\[details(\s+open)?\s+(.*?)\n([\s\S]+?)\]/g,
+      (match: string, isOpen: string, summary: string, content: string) => {
+        const openAttr = isOpen ? ' open' : '';
+        return `<details${openAttr}><summary>${summary.trim()}</summary>${content}</details>`;
+      },
+    );
+  }
+
+  private convertColumns(markdown: string): string {
+    // Find all column blocks
+    const columnRegex = /\[column\n([\s\S]+?)\]/g;
+    const columns: string[] = [];
+    let match: RegExpExecArray | null;
+
+    // Extract all column content
+    while ((match = columnRegex.exec(markdown)) !== null) {
+      columns.push(match[1]);
+    }
+
+    // If we have columns, replace the entire column section
+    if (columns.length >= 2) {
+      // Create a regex to match the entire column section
+      const fullSectionRegex = /(\[column\n[\s\S]+?\][\s\n]*){2,}/g;
+
+      return markdown.replace(fullSectionRegex, (match: string) => {
+        let columnHtml = '<div class="columns">';
+        columns.forEach((content) => {
+          columnHtml += `<div class="column">${content}</div>`;
+        });
+        columnHtml += '</div>';
+        return columnHtml;
+      });
+    }
+
+    return markdown;
+  }
+
+  private convertCallouts(markdown: string): string {
+    // Handle various callout types
+    const calloutTypes = ['note', 'warning', 'info', 'draft'];
+
+    let result = markdown;
+
+    calloutTypes.forEach((type) => {
+      // Match callouts with and without labels
+      const withLabelRegex = new RegExp(
+        `<\\$>\\[${type}\\]\\n\\[label\\s+([^\\]]+)\\]\\n([\\s\\S]+?)<\\$>`,
+        'g',
+      );
+      const withoutLabelRegex = new RegExp(
+        `<\\$>\\[${type}\\]\\n([\\s\S]+?)<\\$>`,
+        'g',
+      );
+
+      // Process callouts with labels
+      result = result.replace(
+        withLabelRegex,
+        (match: string, label: string, content: string) => {
+          return `<div class="callout ${type}">
+          <div class="callout-label">${label}</div>
+          <div class="callout-content">${content}</div>
+        </div>`;
+        },
+      );
+
+      // Process callouts without labels
+      result = result.replace(
+        withoutLabelRegex,
+        (match: string, content: string) => {
+          return `<div class="callout ${type}">
+          <div class="callout-content">${content}</div>
+        </div>`;
+        },
+      );
+    });
+
+    return result;
+  }
+
+  private convertNotes(markdown: string): string {
+    // Match **Note:** pattern and convert to styled note
+    return markdown.replace(
+      /\*\*Note:\*\* ([\s\S]+?)(?=\n\n|\n\*\*|\n#|$)/g,
+      (match: string, content: string) => {
+        return `<div class="note-block"><strong>Note:</strong> ${content.trim()}</div>`;
+      },
+    );
+  }
+
+  private convertHeaders(markdown: string): string {
+    const slugify = (text: string): string => {
+      return text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '') // Remove special chars
+        .replace(/\s+/g, '-') // Replace spaces with hyphens
+        .replace(/--+/g, '-') // Replace multiple hyphens with single
+        .trim(); // Trim start/end
+    };
+
+    let result = markdown;
+
+    // Convert h1 with ID
+    result = result.replace(/^# (.*$)/gm, (match: string, text: string) => {
+      const id = slugify(text);
+      return `<h1 id="${id}">${text}</h1>`;
+    });
+
+    // Convert h2 with ID
+    result = result.replace(/^## (.*$)/gm, (match: string, text: string) => {
+      const id = slugify(text);
+      return `<h2 id="${id}">${text}</h2>`;
+    });
+
+    // Convert h3 with ID
+    result = result.replace(/^### (.*$)/gm, (match: string, text: string) => {
+      const id = slugify(text);
+      return `<h3 id="${id}">${text}</h3>`;
+    });
+
+    // Convert h4 with ID
+    result = result.replace(/^#### (.*$)/gm, (match: string, text: string) => {
+      const id = slugify(text);
+      return `<h4 id="${id}">${text}</h4>`;
+    });
+
+    // Convert h5 with ID
+    result = result.replace(/^##### (.*$)/gm, (match: string, text: string) => {
+      const id = slugify(text);
+      return `<h5 id="${id}">${text}</h5>`;
+    });
+
+    // Convert h6 with ID
+    result = result.replace(
+      /^###### (.*$)/gm,
+      (match: string, text: string) => {
+        const id = slugify(text);
+        return `<h6 id="${id}">${text}</h6>`;
+      },
+    );
+
+    return result;
+  }
+
+  private convertLinks(markdown: string): string {
+    // Handle standard Markdown links [text](url)
+    let result = markdown.replace(
+      /\[(.*?)\]\((.*?)(?:\s+"(.*?)")?\)/g,
+      (match: string, text: string, url: string, title: string) => {
+        return `<a href="${url}"${title ? ` title="${title}"` : ''}>${text}</a>`;
+      },
+    );
+
+    // Handle reference-style links [text](#anchor)
+    result = result.replace(
+      /\[(.*?)\]\(#(.*?)\)/g,
+      (match: string, text: string, anchor: string) => {
+        return `<a href="#${anchor}" class="anchor-link">${text}</a>`;
+      },
+    );
+
+    // Handle automatic links <url>
+    result = result.replace(
+      /<(https?:\/\/[^>]+)>/g,
+      (match: string, url: string) => {
+        return `<a href="${url}" class="auto-link">${url}</a>`;
+      },
+    );
+
+    return result;
+  }
+
+  /**
+   * Add a new method to clean any HTML output to remove unwanted BR tags
+   */
+  private cleanHtml(html: string): string {
+    // Remove <br> tags that appear right after HTML tags
+    let cleaned = html.replace(/>(\s*)<br>/g, '>$1');
+    
+    // Remove <br> tags that appear right before HTML closing tags
+    cleaned = cleaned.replace(/<br>(\s*)</g, '$1<');
+    
+    return cleaned;
   }
 }
