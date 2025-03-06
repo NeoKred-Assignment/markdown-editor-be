@@ -21,6 +21,7 @@
   },
   "include": [
     "src/**/*",
-    "commitlint.config.js"
+    "commitlint.config.js",
+    ".eslintrc.js"
   ]
 }
