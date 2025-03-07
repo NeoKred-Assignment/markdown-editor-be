@@ -4,112 +4,139 @@
 /* eslint-disable prettier/prettier */
 /* eslint-disable prefer-const */
 /* eslint-disable no-useless-escape */
-import { Injectable } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 
 @Injectable()
 export class MarkdownService {
   convertToHtml(markdown: string): string {
-    // Allow raw HTML blocks to pass through without processing
-    const rawHtmlBlocks: string[] = [];
-    markdown = markdown.replace(/```html\n([\s\S]+?)\n```/g, (match, content) => {
-      const index = rawHtmlBlocks.length;
-      rawHtmlBlocks.push(content);
-      return `__RAW_HTML_BLOCK_${index}__`;
-    });
+    // Add a test error trigger
+    if (markdown.includes('[[TEST_ERROR]]')) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'This is a test error from the backend',
+          error: 'Test Error',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
 
-    // Process front matter
-    markdown = this.processFrontMatter(markdown);
+    try {
+      // Allow raw HTML blocks to pass through without processing
+      const rawHtmlBlocks: string[] = [];
+      markdown = markdown.replace(
+        /```html\n([\s\S]+?)\n```/g,
+        (match, content) => {
+          const index = rawHtmlBlocks.length;
+          rawHtmlBlocks.push(content);
+          return `__RAW_HTML_BLOCK_${index}__`;
+        },
+      );
 
-    // Convert headers with anchor IDs
-    markdown = this.convertHeaders(markdown);
+      // Process front matter
+      markdown = this.processFrontMatter(markdown);
 
-    // Convert horizontal rules
-    markdown = markdown.replace(
-      /^(___|\*\*\*|---)$/gm,
-      '<hr class="markdown-hr">',
-    );
+      // Convert headers with anchor IDs
+      markdown = this.convertHeaders(markdown);
 
-    // Convert typographic replacements
-    markdown = this.convertTypography(markdown);
+      // Convert horizontal rules
+      markdown = markdown.replace(
+        /^(___|\*\*\*|---)$/gm,
+        '<hr class="markdown-hr">',
+      );
 
-    // Convert callouts and notes
-    markdown = this.convertCallouts(markdown);
-    markdown = this.convertNotes(markdown);
+      // Convert typographic replacements
+      markdown = this.convertTypography(markdown);
 
-    // Convert code blocks with syntax highlighting (must come before inline code)
-    markdown = this.convertCodeBlocks(markdown);
+      // Convert callouts and notes
+      markdown = this.convertCallouts(markdown);
+      markdown = this.convertNotes(markdown);
 
-    // Convert bold, italic and strikethrough
-    markdown = markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    markdown = markdown.replace(/__(.*?)__/g, '<strong>$1</strong>');
-    markdown = markdown.replace(/\*(.*?)\*/g, '<em>$1</em>');
-    markdown = markdown.replace(/_(.*?)_/g, '<em>$1</em>');
-    markdown = markdown.replace(/~~(.*?)~~/g, '<del>$1</del>');
+      // Convert code blocks with syntax highlighting (must come before inline code)
+      markdown = this.convertCodeBlocks(markdown);
 
-    // Convert blockquotes with nesting
-    markdown = this.convertBlockquotes(markdown);
+      // Convert bold, italic and strikethrough
+      markdown = markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      markdown = markdown.replace(/__(.*?)__/g, '<strong>$1</strong>');
+      markdown = markdown.replace(/\*(.*?)\*/g, '<em>$1</em>');
+      markdown = markdown.replace(/_(.*?)_/g, '<em>$1</em>');
+      markdown = markdown.replace(/~~(.*?)~~/g, '<del>$1</del>');
 
-    // Convert lists with proper nesting support
-    markdown = this.convertLists(markdown);
+      // Convert blockquotes with nesting
+      markdown = this.convertBlockquotes(markdown);
 
-    // Convert tables
-    markdown = this.convertTables(markdown);
+      // Convert lists with proper nesting support
+      markdown = this.convertLists(markdown);
 
-    // Convert images (must come before links)
-    markdown = this.convertImages(markdown);
+      // Convert tables
+      markdown = this.convertTables(markdown);
 
-    // Convert links with support for anchors
-    markdown = this.convertLinks(markdown);
+      // Convert images (must come before links)
+      markdown = this.convertImages(markdown);
 
-    // Convert inline code (after code blocks)
-    markdown = markdown.replace(
-      /`([^`]+)`/g,
-      '<code class="inline-code">$1</code>',
-    );
+      // Convert links with support for anchors
+      markdown = this.convertLinks(markdown);
 
-    // Convert footnotes
-    markdown = this.convertFootnotes(markdown);
+      // Convert inline code (after code blocks)
+      markdown = markdown.replace(
+        /`([^`]+)`/g,
+        '<code class="inline-code">$1</code>',
+      );
 
-    // Convert definition lists
-    markdown = this.convertDefinitionLists(markdown);
+      // Convert footnotes
+      markdown = this.convertFootnotes(markdown);
 
-    // Convert abbreviations
-    markdown = this.convertAbbreviations(markdown);
+      // Convert definition lists
+      markdown = this.convertDefinitionLists(markdown);
 
-    // Convert custom containers
-    markdown = this.convertCustomContainers(markdown);
+      // Convert abbreviations
+      markdown = this.convertAbbreviations(markdown);
 
-    // Convert subscript/superscript
-    markdown = markdown.replace(/~([^~]+)~/g, '<sub>$1</sub>');
-    markdown = markdown.replace(/\^([^\^]+)\^/g, '<sup>$1</sup>');
+      // Convert custom containers
+      markdown = this.convertCustomContainers(markdown);
 
-    // Convert embeds
-    markdown = this.convertEmbeds(markdown);
+      // Convert subscript/superscript
+      markdown = markdown.replace(/~([^~]+)~/g, '<sub>$1</sub>');
+      markdown = markdown.replace(/\^([^\^]+)\^/g, '<sup>$1</sup>');
 
-    // Convert details/summary elements
-    markdown = this.convertDetails(markdown);
+      // Convert embeds
+      markdown = this.convertEmbeds(markdown);
 
-    // Convert columns layout
-    markdown = this.convertColumns(markdown);
+      // Convert details/summary elements
+      markdown = this.convertDetails(markdown);
 
-    // Convert line breaks (but preserve paragraphs)
-    markdown = this.convertLineBreaks(markdown);
+      // Convert columns layout
+      markdown = this.convertColumns(markdown);
 
-    // Clean the final HTML to remove unnecessary <br> tags
-    markdown = this.cleanHtml(markdown);
+      // Convert line breaks (but preserve paragraphs)
+      markdown = this.convertLineBreaks(markdown);
 
-    // Fix HTML entities in attributes (add this new step)
-    markdown = this.fixHtmlEntities(markdown);
+      // Clean the final HTML to remove unnecessary <br> tags
+      markdown = this.cleanHtml(markdown);
 
-    // In your convertToHtml method, add a step for direct media embedding
-    markdown = this.processDirectMediaEmbeds(markdown);
+      // Fix HTML entities in attributes (add this new step)
+      markdown = this.fixHtmlEntities(markdown);
 
-    // At the very end, restore the raw HTML blocks
-    rawHtmlBlocks.forEach((block, index) => {
-      markdown = markdown.replace(`__RAW_HTML_BLOCK_${index}__`, block);
-    });
+      // In your convertToHtml method, add a step for direct media embedding
+      markdown = this.processDirectMediaEmbeds(markdown);
 
-    return markdown;
+      // At the very end, restore the raw HTML blocks
+      rawHtmlBlocks.forEach((block, index) => {
+        markdown = markdown.replace(`__RAW_HTML_BLOCK_${index}__`, block);
+      });
+
+      return markdown;
+    } catch (error) {
+      console.error('Error converting markdown to HTML:', error);
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Failed to convert markdown to HTML',
+          error: error instanceof Error ? error.message : String(error),
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   private processFrontMatter(markdown: string): string {
@@ -954,7 +981,7 @@ export class MarkdownService {
       (match, url, type, height, width) => {
         const h = height ? `height="${height}"` : '';
         const w = width ? `width="${width}"` : '';
-        const audioType = type || this.getAudioTypeFromUrl(url);
+        const audioType: any = type || this.getAudioTypeFromUrl(url);
 
         return `<div class="audio-embed">
           <audio controls preload="metadata" ${h} ${w}>
@@ -963,7 +990,7 @@ export class MarkdownService {
           </audio>
           <div class="audio-info">
             <span class="audio-title">Audio</span>
-            <span class="audio-format">${audioType.toUpperCase()}</span>
+            <span class="audio-format">${String(audioType).toUpperCase()}</span>
           </div>
         </div>`;
       },
@@ -1059,7 +1086,7 @@ export class MarkdownService {
       .replace(/&ldquo;/g, '"')
       .replace(/&rdquo;/g, '"')
       .replace(/&quot;/g, '"');
-      
+
     // Ensure URL is properly encoded
     return cleanUrl.trim();
   }
@@ -1254,13 +1281,15 @@ export class MarkdownService {
   // Add this new method to fix HTML entities in attribute values
   private fixHtmlEntities(html: string): string {
     // Fix quotes in HTML attribute values
-    const attributeRegex = /(\s+[a-zA-Z-]+)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
+    const attributeRegex =
+      /(\s+[a-zA-Z-]+)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
     html = html.replace(attributeRegex, '$1="$3"');
-    
+
     // Also fix direct entity usage in src attributes (common for media)
-    const srcRegex = /(src|href)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
+    const srcRegex =
+      /(src|href)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
     html = html.replace(srcRegex, '$1="$3"');
-    
+
     return html;
   }
 
@@ -1277,7 +1306,7 @@ export class MarkdownService {
             <p>Your browser does not support audio playback.</p>
           </audio>
         </div>`;
-      }
+      },
     );
 
     // For video
@@ -1291,7 +1320,7 @@ export class MarkdownService {
             <p>Your browser does not support video playback.</p>
           </video>
         </div>`;
-      }
+      },
     );
 
     return markdown;
