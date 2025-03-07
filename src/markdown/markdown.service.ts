@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable prettier/prettier */
 /* eslint-disable prefer-const */
@@ -7,6 +9,14 @@ import { Injectable } from '@nestjs/common';
 @Injectable()
 export class MarkdownService {
   convertToHtml(markdown: string): string {
+    // Allow raw HTML blocks to pass through without processing
+    const rawHtmlBlocks: string[] = [];
+    markdown = markdown.replace(/```html\n([\s\S]+?)\n```/g, (match, content) => {
+      const index = rawHtmlBlocks.length;
+      rawHtmlBlocks.push(content);
+      return `__RAW_HTML_BLOCK_${index}__`;
+    });
+
     // Process front matter
     markdown = this.processFrontMatter(markdown);
 
@@ -87,6 +97,17 @@ export class MarkdownService {
 
     // Clean the final HTML to remove unnecessary <br> tags
     markdown = this.cleanHtml(markdown);
+
+    // Fix HTML entities in attributes (add this new step)
+    markdown = this.fixHtmlEntities(markdown);
+
+    // In your convertToHtml method, add a step for direct media embedding
+    markdown = this.processDirectMediaEmbeds(markdown);
+
+    // At the very end, restore the raw HTML blocks
+    rawHtmlBlocks.forEach((block, index) => {
+      markdown = markdown.replace(`__RAW_HTML_BLOCK_${index}__`, block);
+    });
 
     return markdown;
   }
@@ -279,49 +300,140 @@ export class MarkdownService {
   }
 
   private convertTables(markdown: string): string {
+    // First identify and handle standard markdown tables with a very specific pattern
+    const lines = markdown.split('\n');
+    const processed: string[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      // Look for the start of a table (a line that begins with |)
+      if (lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        // Check if next line exists and is a separator row
+        if (
+          i + 1 < lines.length &&
+          lines[i + 1].trim().startsWith('|') &&
+          lines[i + 1].trim().endsWith('|') &&
+          lines[i + 1].includes('-')
+        ) {
+          // Look ahead to find the end of the table
+          let endIndex = i + 2;
+          while (
+            endIndex < lines.length &&
+            lines[endIndex].trim().startsWith('|') &&
+            lines[endIndex].trim().endsWith('|')
+          ) {
+            endIndex++;
+          }
+
+          if (endIndex > i + 2) {
+            // We have a table with at least header, separator, and one data row
+            // Extract table rows
+            const tableRows = lines.slice(i, endIndex);
+
+            // Create HTML table
+            let tableHtml: any =
+              '<div class="table-container"><table class="markdown-table">';
+
+            // Add header (first row)
+            tableHtml += '<thead><tr>';
+            const headerCells = this.extractTableCells(tableRows[0]);
+            headerCells.forEach((cell) => {
+              tableHtml += `<th>${this.processTableCellContent(cell.trim())}</th>`;
+            });
+            tableHtml += '</tr></thead>';
+
+            // Add body (skip the separator row)
+            tableHtml += '<tbody>';
+            for (let rowIndex = 2; rowIndex < tableRows.length; rowIndex++) {
+              const row = tableRows[rowIndex];
+              tableHtml += '<tr>';
+              const cells = this.extractTableCells(row);
+              cells.forEach((cell) => {
+                tableHtml += `<td>${this.processTableCellContent(cell.trim())}</td>`;
+              });
+              tableHtml += '</tr>';
+            }
+            tableHtml += '</tbody></table></div>';
+
+            // Add the processed table
+            processed.push(tableHtml);
+
+            // Skip past the table in our processing
+            i = endIndex - 1;
+            continue;
+          }
+        }
+      }
+
+      // Not a table, just add the line as is
+      processed.push(lines[i]);
+    }
+
+    // Fall back to the existing table processing for any tables we didn't handle
+    let result = processed.join('\n');
+    if (!result.includes('<table class="markdown-table">')) {
+      result = this.processTablesWithRegex(result);
+    }
+
+    return result;
+  }
+
+  // Move the existing table processing to a separate method
+  private processTablesWithRegex(markdown: string): string {
     let result = markdown;
-    
-    // First handle standard markdown tables
-    const standardTableRegex = /^\|(.*\|)+\s*\n\|([\s\-:|]+\|)+\s*\n(\|(.*\|)+\s*\n?)+/gm;
+
+    // Use the existing regex patterns and methods
+    const standardTableRegex =
+      /(?:^|\n)[ \t]*\|(.*\|)[ \t]*\n[ \t]*\|([-:\|\s]+)\|[ \t]*\n((?:[ \t]*\|.*\|[ \t]*\n?)+)/gm;
     result = result.replace(standardTableRegex, (match) => {
       return this.processStandardTable(match);
     });
-    
-    // Then handle simple pipe tables (without separator row)
-    const simplePipeTableRegex = /(?:^|\n)(\|[^\n]+\|\s*\n)(?:\|[^\n]+\|\s*\n)+/g;
+
+    const simplePipeTableRegex =
+      /(?:^|\n)(\|[^\n]+\|\s*\n)(?:\|[^\n]+\|\s*\n)+/g;
     result = result.replace(simplePipeTableRegex, (match) => {
-      // Skip if already processed as a standard table
       if (match.includes('<table class="markdown-table">')) {
         return match;
       }
       return this.processSimpleTable(match);
     });
-    
+
     return result;
+  }
+
+  /**
+   * Helper method to check if a row is a separator row (consists of only dashes, colons, and spaces)
+   */
+  private isSeparatorRow(cells: string[]): boolean {
+    return cells.every((cell) => {
+      const trimmed = cell.trim();
+      // Check if cell contains primarily dashes, hyphens, colons, or separator-like characters
+      // Including various Unicode dash characters that might be present
+      return !trimmed || /^[\s\-:|–—―−﹘﹣－+]+$/.test(trimmed);
+    });
   }
 
   /**
    * Processes a standard markdown table with header, separator, and body rows
    */
   private processStandardTable(tableText: string): string {
-    // Split the table into rows and clean them
-    const rows = tableText.trim().split('\n').map(row => row.trim());
-    
+    const rows = tableText
+      .trim()
+      .split('\n')
+      .map((row) => row.trim());
+
     if (rows.length < 3) {
       return tableText; // Not enough rows for a proper table
     }
-    
-    // Extract the header row
+
     const headerRow = rows[0];
     const headerCells = this.extractTableCells(headerRow);
-    
-    // Process the separator row to determine alignments
+
     const separatorRow = rows[1];
     const alignments = this.extractTableAlignments(separatorRow);
-    
-    // Generate table HTML without newlines between tags
-    let tableHtml = '<div class="table-container table-debug"><table class="markdown-table">';
-    
+
+    let tableHtml =
+      '<div class="table-container"><table class="markdown-table">';
+
     // Add header
     tableHtml += '<thead><tr>';
     headerCells.forEach((cell, index) => {
@@ -330,26 +442,29 @@ export class MarkdownService {
       tableHtml += `<th class="align-${alignment}">${processedContent}</th>`;
     });
     tableHtml += '</tr></thead>';
-    
-    // Add body - SKIP ROW WITH DASHES (row 1 is already processed as separator)
+
+    // Add body - FORCE SKIP the separator row (row 1)
     tableHtml += '<tbody>';
     for (let i = 2; i < rows.length; i++) {
       const row = rows[i];
-      // Skip empty rows and separator-like rows
-      if (!row.trim() || row.replace(/[\s\-|:]/g, '').length === 0) continue;
-      
+      if (!row.trim()) continue;
+
       const cells = this.extractTableCells(row);
-      
+
+      // Skip any row that looks like a separator
+      if (this.isSeparatorRow(cells)) continue;
+
       tableHtml += '<tr>';
       cells.forEach((cell, index) => {
-        const alignment = index < alignments.length ? alignments[index] : 'left';
+        const alignment =
+          index < alignments.length ? alignments[index] : 'left';
         const processedContent = this.processTableCellContent(cell.trim());
         tableHtml += `<td class="align-${alignment}">${processedContent}</td>`;
       });
       tableHtml += '</tr>';
     }
     tableHtml += '</tbody></table></div>';
-    
+
     return tableHtml;
   }
 
@@ -358,53 +473,60 @@ export class MarkdownService {
    */
   private processSimpleTable(tableText: string): string {
     // Split the table into rows and clean them
-    const rows = tableText.trim().split('\n').map(row => row.trim());
-    
+    const rows = tableText
+      .trim()
+      .split('\n')
+      .map((row) => row.trim());
+
     if (rows.length < 2) {
       return tableText; // Not enough rows for a proper table
     }
-    
+
     // Extract the cells from all rows
-    const allRows = rows.map(row => this.extractTableCells(row));
-    
-    // Check if the second row looks like a separator row
-    const isSeparatorRow = (row: string[]) => {
-      return row.every(cell => !cell.trim() || /^[\s\-:]+$/.test(cell.trim()));
-    };
-    
-    // Determine if we have a separator row
-    const hasSeparator = allRows.length > 1 && isSeparatorRow(allRows[1]);
+    const allRows = rows.map((row) => this.extractTableCells(row));
+
+    // Force check if second row looks like a separator
+    const secondRowIsSeparator =
+      rows.length > 1 && this.isSeparatorRow(this.extractTableCells(rows[1]));
+
+    // If the second row appears to be a separator, process as standard table
+    if (secondRowIsSeparator) {
+      return this.processStandardTable(tableText);
+    }
+
+    // Process as a simple table
     const headerIndex = 0;
-    const bodyStartIndex = hasSeparator ? 2 : 1;
-    
-    // Generate table HTML without newlines between tags
-    let tableHtml = '<div class="table-container table-debug"><table class="markdown-table simple-table">';
-    
+    const bodyStartIndex = 1;
+
+    // Generate table HTML
+    let tableHtml =
+      '<div class="table-container"><table class="markdown-table simple-table">';
+
     // Add header
     tableHtml += '<thead><tr>';
-    allRows[headerIndex].forEach(cell => {
+    allRows[headerIndex].forEach((cell) => {
       const processedContent = this.processTableCellContent(cell.trim());
       tableHtml += `<th>${processedContent}</th>`;
     });
     tableHtml += '</tr></thead>';
-    
+
     // Add body
     tableHtml += '<tbody>';
     for (let i = bodyStartIndex; i < allRows.length; i++) {
       const cells = allRows[i];
-      
+
       // Skip separator-like rows
-      if (isSeparatorRow(cells)) continue;
-      
+      if (this.isSeparatorRow(cells)) continue;
+
       tableHtml += '<tr>';
-      cells.forEach(cell => {
+      cells.forEach((cell) => {
         const processedContent = this.processTableCellContent(cell.trim());
         tableHtml += `<td>${processedContent}</td>`;
       });
       tableHtml += '</tr>';
     }
     tableHtml += '</tbody></table></div>';
-    
+
     return tableHtml;
   }
 
@@ -413,48 +535,52 @@ export class MarkdownService {
    */
   private processTableCellContent(cellContent: string): string {
     if (!cellContent) return '';
-    
+
     // Process inline elements
     let processed = cellContent;
-    
+
     // Process images with proper sizing
-    processed = processed.replace(/!\[(.*?)\]\((.*?)\)/g, 
-      '<img src="$2" alt="$1" class="table-image">');
-      
-    // Process links
-    processed = processed.replace(/\[(.*?)\]\((.*?)\)/g, 
-      '<a href="$2" target="_blank">$1</a>');
-      
+    processed = processed.replace(
+      /!\[(.*?)\]\((.*?)\)/g,
+      '<img src="$2" alt="$1" class="table-image">',
+    );
+
+    // Process links - fix the target="_blank" issue
+    processed = processed.replace(
+      /\[(.*?)\]\((.*?)\)/g,
+      '<a href="$2" target="_blank">$1</a>',
+    );
+
     // Process bold text
     processed = processed.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     processed = processed.replace(/__(.*?)__/g, '<strong>$1</strong>');
-    
+
     // Process italic text
     processed = processed.replace(/\*(.*?)\*/g, '<em>$1</em>');
     processed = processed.replace(/_(.*?)_/g, '<em>$1</em>');
-    
+
     // Process code spans
     processed = processed.replace(/`(.*?)`/g, '<code>$1</code>');
-    
+
     // Replace any remaining newlines with spaces instead of <br>
     processed = processed.replace(/\n/g, ' ');
-    
+
     return processed;
   }
 
   private extractTableCells(row: string): string[] {
     // Remove leading and trailing | and whitespace
     const trimmedRow = row.trim().replace(/^\||\|\s*$/g, '');
-    
+
     // Split by | but preserve escaped pipe characters
     let cells: string[] = [];
     let currentCell: string = '';
     let insideCode: boolean = false;
-    
+
     for (let i = 0; i < trimmedRow.length; i++) {
       const char = trimmedRow[i];
       const nextChar = trimmedRow[i + 1] || '';
-      
+
       if (char === '`') {
         insideCode = !insideCode;
         currentCell += char;
@@ -468,22 +594,22 @@ export class MarkdownService {
         currentCell += char;
       }
     }
-    
+
     // Add the last cell
     cells.push(currentCell);
-    
+
     return cells;
   }
 
   private extractTableAlignments(separatorRow: string): string[] {
     // Remove leading and trailing | and whitespace
     const trimmedRow = separatorRow.trim().replace(/^\||\|\s*$/g, '');
-    
+
     // Split by |
     const cells = trimmedRow.split('|');
-    
+
     // Determine alignment based on the position of : characters
-    return cells.map(cell => {
+    return cells.map((cell) => {
       const trimmed = cell.trim();
       if (trimmed.startsWith(':') && trimmed.endsWith(':')) {
         return 'center';
@@ -811,10 +937,13 @@ export class MarkdownService {
         const videoType = type || this.getVideoTypeFromUrl(url);
 
         return `<div class="video-embed html5-video">
-          <video controls ${h} ${w} ${posterAttr}>
-            <source src="${url}" type="video/${videoType}">
-            Your browser does not support the video tag.
+          <video controls preload="metadata" ${h} ${w} ${posterAttr} playsinline>
+            <source src="${this.ensureValidUrl(url)}" type="video/${videoType}">
+            <p class="video-fallback">Your browser does not support the video tag.</p>
           </video>
+          <div class="video-controls-overlay">
+            <button class="play-button" aria-label="Play video"></button>
+          </div>
         </div>`;
       },
     );
@@ -828,10 +957,14 @@ export class MarkdownService {
         const audioType = type || this.getAudioTypeFromUrl(url);
 
         return `<div class="audio-embed">
-          <audio controls ${h} ${w}>
-            <source src="${url}" type="audio/${audioType}">
-            Your browser does not support the audio tag.
+          <audio controls preload="metadata" ${h} ${w}>
+            <source src="${this.ensureValidUrl(url)}" type="audio/${audioType}">
+            <p class="audio-fallback">Your browser does not support the audio tag.</p>
           </audio>
+          <div class="audio-info">
+            <span class="audio-title">Audio</span>
+            <span class="audio-format">${audioType.toUpperCase()}</span>
+          </div>
         </div>`;
       },
     );
@@ -888,6 +1021,10 @@ export class MarkdownService {
       case 'ogg':
       case 'ogv':
         return 'ogg';
+      case 'mov':
+        return 'quicktime';
+      case 'avi':
+        return 'x-msvideo';
       default:
         return 'mp4'; // Default to mp4
     }
@@ -904,9 +1041,27 @@ export class MarkdownService {
         return 'wav';
       case 'ogg':
         return 'ogg';
+      case 'aac':
+        return 'aac';
+      case 'flac':
+        return 'flac';
+      case 'm4a':
+        return 'mp4';
       default:
         return 'mpeg'; // Default to mp3
     }
+  }
+
+  // Add this helper method to ensure URLs are properly formatted
+  private ensureValidUrl(url: string): string {
+    // Remove any existing entity encoding
+    let cleanUrl = url
+      .replace(/&ldquo;/g, '"')
+      .replace(/&rdquo;/g, '"')
+      .replace(/&quot;/g, '"');
+      
+    // Ensure URL is properly encoded
+    return cleanUrl.trim();
   }
 
   private convertDetails(markdown: string): string {
@@ -1089,10 +1244,56 @@ export class MarkdownService {
   private cleanHtml(html: string): string {
     // Remove <br> tags that appear right after HTML tags
     let cleaned = html.replace(/>(\s*)<br>/g, '>$1');
-    
+
     // Remove <br> tags that appear right before HTML closing tags
     cleaned = cleaned.replace(/<br>(\s*)</g, '$1<');
-    
+
     return cleaned;
+  }
+
+  // Add this new method to fix HTML entities in attribute values
+  private fixHtmlEntities(html: string): string {
+    // Fix quotes in HTML attribute values
+    const attributeRegex = /(\s+[a-zA-Z-]+)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
+    html = html.replace(attributeRegex, '$1="$3"');
+    
+    // Also fix direct entity usage in src attributes (common for media)
+    const srcRegex = /(src|href)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
+    html = html.replace(srcRegex, '$1="$3"');
+    
+    return html;
+  }
+
+  // Add this new method
+  private processDirectMediaEmbeds(markdown: string): string {
+    // For audio
+    markdown = markdown.replace(
+      /!\[(audio)\]\(([^)]+)\)/g,
+      (match, type, url) => {
+        const audioType = this.getAudioTypeFromUrl(url);
+        return `<div class="audio-embed">
+          <audio controls preload="metadata">
+            <source src="${url}" type="audio/${audioType}">
+            <p>Your browser does not support audio playback.</p>
+          </audio>
+        </div>`;
+      }
+    );
+
+    // For video
+    markdown = markdown.replace(
+      /!\[(video)\]\(([^)]+)\)/g,
+      (match, type, url) => {
+        const videoType = this.getVideoTypeFromUrl(url);
+        return `<div class="video-embed html5-video">
+          <video controls preload="metadata" playsinline>
+            <source src="${url}" type="video/${videoType}">
+            <p>Your browser does not support video playback.</p>
+          </video>
+        </div>`;
+      }
+    );
+
+    return markdown;
   }
 }
