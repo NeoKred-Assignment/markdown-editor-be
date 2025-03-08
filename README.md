@@ -29,11 +29,8 @@ The backend of this Markdown editor is built using Node.js. It handles the conve
    ```bash
    yarn install
    ```
-4. Start the server using Docker Compose:
-   ```bash
-   docker-compose up
-   ```
-5. API Documentation:
+
+4. API Documentation:
    ```bash
    http://localhost:8000/api/docs
    ```
@@ -42,9 +39,9 @@ The backend of this Markdown editor is built using Node.js. It handles the conve
 
 To start the server, run the following command using Yarn:
 ```bash
-docker-compose up
-OR
 yarn start:dev 
+OR
+docker-compose up
 ```
 
 This will start the server on port 8000.
