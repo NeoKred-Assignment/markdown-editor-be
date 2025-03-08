@@ -17,19 +17,34 @@ The backend of this Markdown editor is built using Node.js. It handles the conve
 
 1. Clone the repository:
    ```bash
-   git clone [repository-url]
+   git clone https://github.com/your-repo/markdown-editor-be.git
    ```
 
 2. Navigate to the backend directory:
    ```bash
-   cd path/to/backend
+   cd markdown-editor-be
    ```
 
 3. Install dependencies using Yarn:
    ```bash
    yarn install
    ```
+4. Start the server using Docker Compose:
+   ```bash
+   docker-compose up
+   ```
+5. API Documentation:
+   ```bash
+   http://localhost:8000/api/docs
+   ```
 
 ### Running the Server
 
 To start the server, run the following command using Yarn:
+```bash
+docker-compose up
+OR
+yarn start:dev 
+```
+
+This will start the server on port 8000.
