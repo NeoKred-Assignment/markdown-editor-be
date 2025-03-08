@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable prettier/prettier */
+
 /* eslint-disable prefer-const */
 /* eslint-disable no-useless-escape */
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
@@ -9,7 +9,6 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 @Injectable()
 export class MarkdownService {
   convertToHtml(markdown: string): string {
-    // Add a test error trigger
     if (markdown.includes('[[TEST_ERROR]]')) {
       throw new HttpException(
         {
@@ -22,7 +21,6 @@ export class MarkdownService {
     }
 
     try {
-      // Allow raw HTML blocks to pass through without processing
       const rawHtmlBlocks: string[] = [];
       markdown = markdown.replace(
         /```html\n([\s\S]+?)\n```/g,
@@ -33,97 +31,74 @@ export class MarkdownService {
         },
       );
 
-      // Process front matter
       markdown = this.processFrontMatter(markdown);
 
-      // Convert headers with anchor IDs
       markdown = this.convertHeaders(markdown);
 
-      // Convert horizontal rules
       markdown = markdown.replace(
         /^(___|\*\*\*|---)$/gm,
         '<hr class="markdown-hr">',
       );
 
-      // Convert typographic replacements
       markdown = this.convertTypography(markdown);
 
-      // Convert callouts and notes
       markdown = this.convertCallouts(markdown);
       markdown = this.convertNotes(markdown);
 
-      // Convert code blocks with syntax highlighting (must come before inline code)
       markdown = this.convertCodeBlocks(markdown);
 
-      // Convert bold, italic and strikethrough
       markdown = markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       markdown = markdown.replace(/__(.*?)__/g, '<strong>$1</strong>');
       markdown = markdown.replace(/\*(.*?)\*/g, '<em>$1</em>');
       markdown = markdown.replace(/_(.*?)_/g, '<em>$1</em>');
       markdown = markdown.replace(/~~(.*?)~~/g, '<del>$1</del>');
 
-      // Convert blockquotes with nesting
       markdown = this.convertBlockquotes(markdown);
 
-      // Convert lists with proper nesting support
       markdown = this.convertLists(markdown);
 
-      // Convert tables
       markdown = this.convertTables(markdown);
 
-      // Convert images (must come before links)
       markdown = this.convertImages(markdown);
 
-      // Convert links with support for anchors
       markdown = this.convertLinks(markdown);
 
-      // Convert inline code (after code blocks)
       markdown = markdown.replace(
         /`([^`]+)`/g,
         '<code class="inline-code">$1</code>',
       );
 
-      // Convert footnotes
       markdown = this.convertFootnotes(markdown);
 
-      // Convert definition lists
       markdown = this.convertDefinitionLists(markdown);
 
-      // Convert abbreviations
       markdown = this.convertAbbreviations(markdown);
 
-      // Convert custom containers
       markdown = this.convertCustomContainers(markdown);
 
-      // Convert subscript/superscript
       markdown = markdown.replace(/~([^~]+)~/g, '<sub>$1</sub>');
       markdown = markdown.replace(/\^([^\^]+)\^/g, '<sup>$1</sup>');
 
-      // Convert embeds
       markdown = this.convertEmbeds(markdown);
 
-      // Convert details/summary elements
       markdown = this.convertDetails(markdown);
 
-      // Convert columns layout
       markdown = this.convertColumns(markdown);
 
-      // Convert line breaks (but preserve paragraphs)
       markdown = this.convertLineBreaks(markdown);
 
-      // Clean the final HTML to remove unnecessary <br> tags
       markdown = this.cleanHtml(markdown);
 
-      // Fix HTML entities in attributes (add this new step)
       markdown = this.fixHtmlEntities(markdown);
 
-      // In your convertToHtml method, add a step for direct media embedding
       markdown = this.processDirectMediaEmbeds(markdown);
 
-      // At the very end, restore the raw HTML blocks
       rawHtmlBlocks.forEach((block, index) => {
+        block = this.fixHtmlEntities(block);
         markdown = markdown.replace(`__RAW_HTML_BLOCK_${index}__`, block);
       });
+
+      markdown = this.fixHtmlEntities(markdown);
 
       return markdown;
     } catch (error) {
@@ -140,7 +115,6 @@ export class MarkdownService {
   }
 
   private processFrontMatter(markdown: string): string {
-    // Simple front matter handling (remove it from the output)
     return markdown.replace(/^---\n([\s\S]*?)\n---/m, '');
   }
 
@@ -1187,45 +1161,39 @@ export class MarkdownService {
     const slugify = (text: string): string => {
       return text
         .toLowerCase()
-        .replace(/[^\w\s-]/g, '') // Remove special chars
-        .replace(/\s+/g, '-') // Replace spaces with hyphens
-        .replace(/--+/g, '-') // Replace multiple hyphens with single
-        .trim(); // Trim start/end
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/--+/g, '-')
+        .trim();
     };
 
     let result = markdown;
 
-    // Convert h1 with ID
     result = result.replace(/^# (.*$)/gm, (match: string, text: string) => {
       const id = slugify(text);
       return `<h1 id="${id}">${text}</h1>`;
     });
 
-    // Convert h2 with ID
     result = result.replace(/^## (.*$)/gm, (match: string, text: string) => {
       const id = slugify(text);
       return `<h2 id="${id}">${text}</h2>`;
     });
 
-    // Convert h3 with ID
     result = result.replace(/^### (.*$)/gm, (match: string, text: string) => {
       const id = slugify(text);
       return `<h3 id="${id}">${text}</h3>`;
     });
 
-    // Convert h4 with ID
     result = result.replace(/^#### (.*$)/gm, (match: string, text: string) => {
       const id = slugify(text);
       return `<h4 id="${id}">${text}</h4>`;
     });
 
-    // Convert h5 with ID
     result = result.replace(/^##### (.*$)/gm, (match: string, text: string) => {
       const id = slugify(text);
       return `<h5 id="${id}">${text}</h5>`;
     });
 
-    // Convert h6 with ID
     result = result.replace(
       /^###### (.*$)/gm,
       (match: string, text: string) => {
@@ -1238,7 +1206,6 @@ export class MarkdownService {
   }
 
   private convertLinks(markdown: string): string {
-    // Handle standard Markdown links [text](url)
     let result = markdown.replace(
       /\[(.*?)\]\((.*?)(?:\s+"(.*?)")?\)/g,
       (match: string, text: string, url: string, title: string) => {
@@ -1246,7 +1213,6 @@ export class MarkdownService {
       },
     );
 
-    // Handle reference-style links [text](#anchor)
     result = result.replace(
       /\[(.*?)\]\(#(.*?)\)/g,
       (match: string, text: string, anchor: string) => {
@@ -1254,7 +1220,6 @@ export class MarkdownService {
       },
     );
 
-    // Handle automatic links <url>
     result = result.replace(
       /<(https?:\/\/[^>]+)>/g,
       (match: string, url: string) => {
@@ -1265,37 +1230,26 @@ export class MarkdownService {
     return result;
   }
 
-  /**
-   * Add a new method to clean any HTML output to remove unwanted BR tags
-   */
   private cleanHtml(html: string): string {
-    // Remove <br> tags that appear right after HTML tags
     let cleaned = html.replace(/>(\s*)<br>/g, '>$1');
 
-    // Remove <br> tags that appear right before HTML closing tags
     cleaned = cleaned.replace(/<br>(\s*)</g, '$1<');
 
     return cleaned;
   }
 
-  // Add this new method to fix HTML entities in attribute values
   private fixHtmlEntities(html: string): string {
-    // Fix quotes in HTML attribute values
-    const attributeRegex =
-      /(\s+[a-zA-Z-]+)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
-    html = html.replace(attributeRegex, '$1="$3"');
+    html = html.replace(/(&ldquo;|&rdquo;|&quot;)/g, '"');
+    html = html.replace(/(&lsquo;|&rsquo;)/g, "'");
 
-    // Also fix direct entity usage in src attributes (common for media)
-    const srcRegex =
-      /(src|href)=(&ldquo;|&rdquo;|&quot;)(.*?)(&ldquo;|&rdquo;|&quot;)/g;
-    html = html.replace(srcRegex, '$1="$3"');
+    html = html.replace(/&amp;/g, '&');
+    html = html.replace(/&lt;/g, '<');
+    html = html.replace(/&gt;/g, '>');
 
     return html;
   }
 
-  // Add this new method
   private processDirectMediaEmbeds(markdown: string): string {
-    // For audio
     markdown = markdown.replace(
       /!\[(audio)\]\(([^)]+)\)/g,
       (match, type, url) => {
@@ -1309,7 +1263,6 @@ export class MarkdownService {
       },
     );
 
-    // For video
     markdown = markdown.replace(
       /!\[(video)\]\(([^)]+)\)/g,
       (match, type, url) => {
